@@ -49,7 +49,7 @@ struct StateRecorderModel<StoreState>: ViewModel {
         }
 
         onChange(of: \.currentUpdate) { update in
-            $store.stateOverride.wrappedValue = update
+            store.stateOverride = update
         }
 
         onChange(of: \.currentUpdate, to: nil) {
