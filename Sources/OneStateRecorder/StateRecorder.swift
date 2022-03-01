@@ -1,26 +1,23 @@
 import SwiftUI
 import OneState
-#if canImport(OneStateExtensions)
-import OneStateExtensions
-#endif
-
-//TODO: move to separate package (and repo)
 
 public extension View {
-    func installStateRecorder<State>(for store: Store<State>, alignment: Alignment = .bottomTrailing) -> some View {
-        modifier(StateRecorderModifier<State>(alignment: alignment))
+    func installStateRecorder<State>(for store: Store<State>, alignment: Alignment = .bottomTrailing, printDiff: ((StateUpdate<State, State>) -> Void)? = nil) -> some View {
+        modifier(StateRecorderModifier<State>(alignment: alignment, printDiff: printDiff))
             .modelEnvironment(store)
     }
 }
 
 struct StateRecorderModifier<StoreState>: ViewModifier {
     let alignment: Alignment
+    let printDiff: ((StateUpdate<StoreState, StoreState>) -> Void)?
+    
     @Store var store = StateRecorderModel<StoreState>.State()
 
     func body(content: Content) -> some View {
         ZStack(alignment: alignment) {
             content
-            StateRecorderView(model: $store.viewModel(.init()), alignment: alignment)
+            StateRecorderView(model: $store.viewModel(.init(printDiff: printDiff)), alignment: alignment)
         }
     }
 }
@@ -36,6 +33,8 @@ struct StateRecorderModel<StoreState>: ViewModel {
     
     @ModelEnvironment private var store: Store<StoreState>
     @ModelState private var state: State
+    
+    let printDiff: ((StateUpdate<StoreState, StoreState>) -> Void)?
         
     func onAppear() {
         state.updates.append(store.latestUpdate)
@@ -86,11 +85,16 @@ struct StateRecorderModel<StoreState>: ViewModel {
         $state.binding(\.progress)
     }
     
-#if canImport(OneStateExtensions)
     func printDiffTapped() {
-        state.currentUpdate?.printDiff()
+        guard let update = state.currentUpdate else { return }
+        
+        if let printDiff = printDiff {
+            printDiff(update)
+        } else {
+            print("previous", update.previous)
+            print("current", update.current)
+        }
     }
-#endif
 }
 
 extension StateRecorderModel.State {
@@ -173,13 +177,12 @@ struct StateRecorderView<StoreState>: View {
 //                            Image(systemName: model.isOverridingState ? "play.circle" : "pause.circle")
 //                        }
                               
-#if canImport(OneStateExtensions)
                         Button {
                             model.printDiffTapped()
                         } label: {
                             Image(systemName: "printer")
                         }
-#endif
+
                         Spacer()
                         
                         Button {
