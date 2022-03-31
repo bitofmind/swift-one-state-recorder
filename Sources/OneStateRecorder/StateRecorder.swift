@@ -1,29 +1,31 @@
 import SwiftUI
+import Combine
 import OneState
 
 public extension View {
-    func installStateRecorder<State>(for store: Store<State>, alignment: Alignment = .bottomTrailing, printDiff: ((StateUpdate<State, State>) -> Void)? = nil) -> some View {
-        modifier(StateRecorderModifier<State>(alignment: alignment, printDiff: printDiff))
+    func installStateRecorder<State>(for store: Store<State>, isPaused: Binding<Bool>? = nil, edge: Edge = .bottom, printDiff: ((StateUpdate<State, State>) -> Void)? = nil) -> some View {
+        modifier(StateRecorderModifier<State>(isPaused: isPaused, edge: edge, printDiff: printDiff))
             .modelEnvironment(store)
     }
 }
 
 struct StateRecorderModifier<StoreState>: ViewModifier {
-    let alignment: Alignment
+    let isPaused: Binding<Bool>?
+    let edge: Edge
     let printDiff: ((StateUpdate<StoreState, StoreState>) -> Void)?
     
     @Store var store = StateRecorderModel<StoreState>.State()
-
+    
     func body(content: Content) -> some View {
-        ZStack(alignment: alignment) {
+        ZStack(alignment: edge.alignment) {
             content
-            StateRecorderView(model: $store.viewModel(.init(printDiff: printDiff)), alignment: alignment)
+            StateRecorderContainerView(model: $store.viewModel(StateRecorderModel(printDiff: printDiff)), isPaused: isPaused, edge: edge)
         }
     }
 }
 
 struct StateRecorderModel<StoreState>: ViewModel {
-    struct State {
+    struct State: Equatable {
         var updates: [Update] = []
         var newUpdates: [Update] = []
         var currentUpdate: Update?
@@ -38,6 +40,10 @@ struct StateRecorderModel<StoreState>: ViewModel {
         
     func onAppear() {
         state.updates.append(store.latestUpdate)
+        
+        onDisappear {
+            print()
+        }
 
         onReceive(store.stateDidUpdatePublisher) { update in
             if state.isOverridingState {
@@ -50,7 +56,7 @@ struct StateRecorderModel<StoreState>: ViewModel {
         onChange(of: \.currentUpdate) { update in
             store.stateOverride = update
         }
-
+        
         onChange(of: \.currentUpdate, to: nil) {
             state.updates.append(contentsOf: state.newUpdates)
             state.newUpdates.removeAll()
@@ -58,11 +64,11 @@ struct StateRecorderModel<StoreState>: ViewModel {
     }
     
     func startStateOverrideTapped() {
-        state.currentUpdate = state.updates.last
+        state.isOverridingState = true
     }
 
     func stopStateOverrideTapped() {
-        state.currentUpdate = nil
+        state.isOverridingState = false
     }
     
     func stepForwardTapped() {
@@ -125,7 +131,18 @@ extension StateRecorderModel.State {
     var canStepForward: Bool { index == maxIndex }
 
     var isOverridingState: Bool {
-        currentUpdate != nil
+        get {
+            currentUpdate != nil
+        }
+        set {
+            guard newValue != isOverridingState else { return }
+            
+            if newValue {
+                currentUpdate = updates.last
+            } else {
+                currentUpdate = nil
+            }
+        }
     }
 
     var maxIndex: Int {
@@ -136,29 +153,18 @@ extension StateRecorderModel.State {
         0...maxIndex
     }
 }
-    
-struct StateRecorderView<StoreState>: View {
+
+struct StateRecorderContainerView<StoreState>: View {
     @Model var model: StateRecorderModel<StoreState>
-    let alignment: Alignment
+    let isPaused: Binding<Bool>?
+    let edge: Edge
+    @State var _isPaused = false
+    @State var prev = false
 
     var body: some View {
-        ZStack(alignment: alignment) {
-            if !model.isOverridingState {
-                Button {
-                    withAnimation {
-                        model.startStateOverrideTapped()
-                    }
-                } label: {
-                    Image(systemName: "pause.circle")
-                        .padding(6)
-                        .contentShape(Rectangle())
-                        .recorderBackground(edges: .all)
-                        .cornerRadius(8)
-                }
-                .transition(.move(edge: .trailing))
-                .zIndex(1)
-            }
+        let isPaused = isPaused?.wrappedValue ?? _isPaused
 
+        ZStack(alignment: edge.alignment) {
             if model.isOverridingState {
                 if #available(iOS 14, macOS 11, *) {
                     Color.gray.opacity(0.1)
@@ -168,75 +174,109 @@ struct StateRecorderView<StoreState>: View {
                     Color.gray.opacity(0.1)
                         .transition(.opacity)
                 }
-
-                VStack {
-                    HStack {
-                    //TODO: Add play button to replay using timestamp and optional speed up (x1, x2) or slow down
-//                        Button {
-//                        } label: {
-//                            Image(systemName: model.isOverridingState ? "play.circle" : "pause.circle")
-//                        }
-                              
-                        Button {
-                            model.printDiffTapped()
-                        } label: {
-                            Image(systemName: "printer")
-                        }
-
-                        Spacer()
-                        
-                        Button {
-                            model.longStepBackwardTapped()
-                        } label: {
-                            Image(systemName: "chevron.backward.2")
-                        }
-                        .disabled(model.canStepBackward)
-                        
-                        
-                        Button {
-                            model.stepBackwardTapped()
-                        } label: {
-                            Image(systemName: "chevron.backward")
-                        }
-                        .disabled(model.canStepBackward)
-                        
-                        
-                        Text("\(model.index)/\(model.updates.count-1)")
-                        
-                        Button {
-                            model.stepForwardTapped()
-                        } label: {
-                            Image(systemName: "chevron.forward")
-                        }
-                        .disabled(model.canStepForward)
-                        
-                        Button {
-                            model.longStepForwardTapped()
-                        } label: {
-                            Image(systemName: "chevron.forward.2")
-                        }
-                        .disabled(model.canStepForward)
-                        
-                        Spacer()
-                        
-                        Button {
-                            withAnimation {
-                                model.stopStateOverrideTapped()
-                            }
-                        } label: {
-                            Image(systemName: "xmark.circle")
-                        }
-                    }
-                    
-                    Slider(value: model.progress)
+                
+                StateRecorderView(model: model)
+                    .recorderBackground(edges: .all)
+                    .transition(.move(edge: edge))
+                
+            } else if self.isPaused == nil {
+                Button {
+                    model.startStateOverrideTapped()
+                } label: {
+                    Image(systemName: "pause.circle")
+                        .padding(6)
+                        .contentShape(Rectangle())
+                        .recorderBackground(edges: .all)
+                        .cornerRadius(8)
                 }
-                .padding([.top, .horizontal], 8)
-                .recorderBackground(edges: .all)
-                .transition(.move(edge: .bottom))
+                .transition(.move(edge: edge))
+                .zIndex(1)
             }
         }
+        .animation(.default, value: model.isOverridingState)
         .buttonStyle(.plain)
         .imageScale(.large)
+        .onReceive(Just(isPaused)) { isPaused in
+            guard isPaused != prev else { return }
+            prev = isPaused
+            
+            if isPaused {
+                model.startStateOverrideTapped()
+            } else {
+                model.stopStateOverrideTapped()
+            }
+        }
+        .onReceive(model.stateDidUpdatePublisher) { update in
+            guard let isPaused = update.isOverridingState else { return }
+            self.isPaused?.wrappedValue = isPaused
+        }
+    }
+}
+    
+struct StateRecorderView<StoreState>: View {
+    @Model var model: StateRecorderModel<StoreState>
+
+    var body: some View {
+        VStack {
+            HStack {
+                //TODO: Add play button to replay using timestamp and optional speed up (x1, x2) or slow down
+                //                        Button {
+                //                        } label: {
+                //                            Image(systemName: model.isOverridingState ? "play.circle" : "pause.circle")
+                //                        }
+                
+                Button {
+                    model.printDiffTapped()
+                } label: {
+                    Image(systemName: "printer")
+                }
+                
+                Spacer()
+                
+                Button {
+                    model.longStepBackwardTapped()
+                } label: {
+                    Image(systemName: "chevron.backward.2")
+                }
+                .disabled(model.canStepBackward)
+                
+                
+                Button {
+                    model.stepBackwardTapped()
+                } label: {
+                    Image(systemName: "chevron.backward")
+                }
+                .disabled(model.canStepBackward)
+                
+                
+                Text("\(model.index)/\(model.updates.count-1)")
+                
+                Button {
+                    model.stepForwardTapped()
+                } label: {
+                    Image(systemName: "chevron.forward")
+                }
+                .disabled(model.canStepForward)
+                
+                Button {
+                    model.longStepForwardTapped()
+                } label: {
+                    Image(systemName: "chevron.forward.2")
+                }
+                .disabled(model.canStepForward)
+                
+                Spacer()
+                
+                Button {
+                    model.stopStateOverrideTapped()
+                } label: {
+                    Image(systemName: "xmark.circle")
+                }
+            }
+            
+            Slider(value: model.progress)
+        }
+        .padding([.top, .horizontal], 8)
     }
 }
 
@@ -252,3 +292,15 @@ extension View {
         }
     }
 }
+
+extension Edge {
+    var alignment: Alignment {
+        switch self {
+        case .leading: return .leading
+        case .trailing: return .trailing
+        case .top: return .top
+        case .bottom: return .bottom
+        }
+    }
+}
+
