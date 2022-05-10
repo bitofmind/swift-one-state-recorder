@@ -4,22 +4,22 @@ import OneState
 
 public extension View {
     func installStateRecorder<State>(for store: Store<State>, isPaused: Binding<Bool>? = nil, edge: Edge = .bottom, printDiff: ((StateUpdate<State, State>) -> Void)? = nil) -> some View {
-        modifier(StateRecorderModifier<State>(isPaused: isPaused, edge: edge, printDiff: printDiff))
+        modifier(StateRecorderModifier<State>(isPaused: isPaused, edge: edge))
             .modelEnvironment(store)
+            .modelEnvironment(printDiff)
     }
 }
 
 struct StateRecorderModifier<StoreState>: ViewModifier {
     let isPaused: Binding<Bool>?
     let edge: Edge
-    let printDiff: ((StateUpdate<StoreState, StoreState>) -> Void)?
     
     @Store var store = StateRecorderModel<StoreState>.State()
     
     func body(content: Content) -> some View {
         ZStack(alignment: edge.alignment) {
             content
-            StateRecorderContainerView(model: $store.viewModel(StateRecorderModel(printDiff: printDiff)), isPaused: isPaused, edge: edge)
+            StateRecorderContainerView(model: $store.viewModel(StateRecorderModel()), isPaused: isPaused, edge: edge)
         }
     }
 }
@@ -33,10 +33,10 @@ struct StateRecorderModel<StoreState>: ViewModel {
         typealias Update = StateUpdate<StoreState, StoreState>
     }
     
-    @ModelEnvironment private var store: Store<StoreState>
-    @ModelState private var state: State
-    
-    let printDiff: ((StateUpdate<StoreState, StoreState>) -> Void)?
+    @ModelEnvironment var store: Store<StoreState>
+    @ModelEnvironment var printDiff: ((StateUpdate<StoreState, StoreState>) -> Void)?
+
+    @ModelState var state: State
         
     func onAppear() {
         state.updates.append(store.latestUpdate)
