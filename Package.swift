@@ -12,7 +12,7 @@ let package = Package(
         .library(name: "OneStateRecorder", targets: ["OneStateRecorder"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/bitofmind/swift-one-state", from: "0.1.0"),
+        .package(url: "https://github.com/bitofmind/swift-one-state", from: "0.4.0"),
     ],
     targets: [
         .target(
