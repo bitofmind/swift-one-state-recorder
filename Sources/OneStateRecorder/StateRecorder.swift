@@ -43,10 +43,6 @@ struct StateRecorderModel<Model: ViewModel>: ViewModel {
     func onAppear() {
         state.updates.append(store.latestUpdate)
 
-        onDisappear {
-            print()
-        }
-
         onReceive(store.stateDidUpdatePublisher) { update in
             if state.isOverridingState {
                 state.newUpdates.append(update)
@@ -90,7 +86,7 @@ struct StateRecorderModel<Model: ViewModel>: ViewModel {
     }
 
     var progress: Binding<Double> {
-        $state.binding(\.progress)
+        Binding($state).progress
     }
 
     func printDiffTapped() {
