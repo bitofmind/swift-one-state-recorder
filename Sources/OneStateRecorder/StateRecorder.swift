@@ -3,7 +3,7 @@ import Combine
 import OneState
 
 public extension View {
-    func installStateRecorder<Model: ViewModel>(for store: Store<Model>, isPaused: Binding<Bool>? = nil, edge: Edge = .bottom, printDiff: ((StateUpdate<Model.State, Model.State>) -> Void)? = nil) -> some View {
+    func installStateRecorder<Model: ViewModel>(for store: Store<Model>, isPaused: Binding<Bool>? = nil, edge: Edge = .bottom, printDiff: ((StateUpdate<Model.State, Model.State, Model.Access>) -> Void)? = nil) -> some View {
         modifier(StateRecorderModifier<Model>(isPaused: isPaused, edge: edge))
             .modelEnvironment(store)
             .modelEnvironment(printDiff)
@@ -25,18 +25,16 @@ struct StateRecorderModifier<Model: ViewModel>: ViewModifier {
 }
 
 struct StateRecorderModel<Model: ViewModel>: ViewModel {
-    typealias StoreState = Model.State
+    typealias Update = StateUpdate<Model.State, Model.State, Write>
 
     struct State: Equatable {
         var updates: [Update] = []
         var newUpdates: [Update] = []
         var currentUpdate: Update?
-
-        typealias Update = StateUpdate<StoreState, StoreState>
     }
 
     @ModelEnvironment var store: Store<Model>
-    @ModelEnvironment var printDiff: ((StateUpdate<StoreState, StoreState>) -> Void)?
+    @ModelEnvironment var printDiff: ((Update) -> Void)?
 
     @ModelState var state: State
 
@@ -51,11 +49,11 @@ struct StateRecorderModel<Model: ViewModel>: ViewModel {
             }
         }
 
-        onChange(of: \.currentUpdate) { update in
+        onChange(of: self.currentUpdate) { update in
             store.stateOverride = update
         }
 
-        onChange(of: \.currentUpdate, to: nil) {
+        onChange(of: self.currentUpdate, to: nil) {
             state.updates.append(contentsOf: state.newUpdates)
             state.newUpdates.removeAll()
         }
