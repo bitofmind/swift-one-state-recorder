@@ -3,7 +3,7 @@ import Combine
 import OneState
 
 public extension View {
-    func installStateRecorder<Model: ViewModel>(for store: Store<Model>, isPaused: Binding<Bool>? = nil, edge: Edge = .bottom, printDiff: ((StateUpdate<Model.State, Model.State, Model.Access>) -> Void)? = nil) -> some View {
+    func installStateRecorder<Model: ViewModel>(for store: Store<Model>, isPaused: Binding<Bool>? = nil, edge: Edge = .bottom, printDiff: ((StateUpdate<Model.State, Model.State, Write>) -> Void)? = nil) -> some View {
         modifier(StateRecorderModifier<Model>(isPaused: isPaused, edge: edge))
             .modelEnvironment(store)
             .modelEnvironment(printDiff)
@@ -41,7 +41,7 @@ struct StateRecorderModel<Model: ViewModel>: ViewModel {
     func onAppear() {
         state.updates.append(store.latestUpdate)
 
-        onReceive(store.stateDidUpdatePublisher) { update in
+        forEach(store.stateUpdates) { update in
             if state.isOverridingState {
                 state.newUpdates.append(update)
             } else {
@@ -49,11 +49,11 @@ struct StateRecorderModel<Model: ViewModel>: ViewModel {
             }
         }
 
-        onChange(of: self.currentUpdate) { update in
+        onChange(of: $state.currentUpdate) { update in
             store.stateOverride = update
         }
 
-        onChange(of: self.currentUpdate, to: nil) {
+        onChange(of: $state.currentUpdate, to: nil) {
             state.updates.append(contentsOf: state.newUpdates)
             state.newUpdates.removeAll()
         }
@@ -202,8 +202,7 @@ struct StateRecorderContainerView<VM: ViewModel>: View {
                 model.stopStateOverrideTapped()
             }
         }
-        .onReceive(model.stateDidUpdatePublisher) { update in
-            guard let isPaused = update.isOverridingState else { return }
+        .onReceive($model.isOverridingState.valuePublisher) { isPaused in
             self.isPaused?.wrappedValue = isPaused
         }
     }
