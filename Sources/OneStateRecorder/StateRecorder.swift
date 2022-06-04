@@ -3,10 +3,8 @@ import Combine
 import OneState
 
 public extension View {
-    func installStateRecorder<Model: ViewModel>(for store: Store<Model>, isPaused: Binding<Bool>? = nil, edge: Edge = .bottom, printDiff: ((StateUpdate<Model.State, Model.State, Write>) -> Void)? = nil) -> some View {
-        modifier(StateRecorderModifier<Model>(isPaused: isPaused, edge: edge))
-            .modelEnvironment(store)
-            .modelEnvironment(printDiff)
+    func installStateRecorder<Model: ViewModel>(for store: Store<Model>, isPaused: Binding<Bool>? = nil, edge: Edge = .bottom, printDiff: ((StateUpdate<Model.State>) -> Void)? = nil) -> some View {
+        modifier(StateRecorderModifier<Model>(isPaused: isPaused, edge: edge, store: store, printDiff: printDiff))
     }
 }
 
@@ -14,81 +12,113 @@ struct StateRecorderModifier<Model: ViewModel>: ViewModifier {
     let isPaused: Binding<Bool>?
     let edge: Edge
 
-    @Store<StateRecorderModel<Model>> var store = .init()
+    @StateObject var model: StateRecorderModel<Model>
+
+    init(isPaused: Binding<Bool>?, edge: Edge, store: Store<Model>, printDiff: ((StateUpdate<Model.State>) -> Void)?) {
+        self.isPaused = isPaused
+        self.edge = edge
+        _model = .init(wrappedValue: StateRecorderModel(store: store, printDiff: printDiff))
+    }
 
     func body(content: Content) -> some View {
         ZStack(alignment: edge.alignment) {
             content
-            StateRecorderContainerView(model: $store.model, isPaused: isPaused, edge: edge)
+            StateRecorderContainerView(model: model, isPaused: isPaused, edge: edge)
         }
     }
 }
 
-struct StateRecorderModel<Model: ViewModel>: ViewModel {
-    typealias Update = StateUpdate<Model.State, Model.State, Write>
+class StateRecorderModel<Model: ViewModel>: ObservableObject {
+    let store: Store<Model>
+    let printDiff: ((Update) -> Void)?
 
-    struct State: Equatable {
-        var updates: [Update] = []
-        var newUpdates: [Update] = []
-        var currentUpdate: Update?
-    }
+    typealias Update = StateUpdate<Model.State>
+    @Published var updates: [Update] = []
+    @Published var newUpdates: [Update] = []
+    @Published var currentUpdate: Update?
 
-    @ModelEnvironment var store: Store<Model>
-    @ModelEnvironment var printDiff: ((Update) -> Void)?
+    var updatesCount: Int { updates.count }
 
-    @ModelState var state: State
+    var cancellables = Set<AnyCancellable>()
 
-    func onAppear() {
-        state.updates.append(store.latestUpdate)
+    init(store: Store<Model>, printDiff: ((Update) -> Void)?) {
+        self.store = store
+        self.printDiff = printDiff
 
-        forEach(store.stateUpdates) { update in
-            if state.isOverridingState {
-                state.newUpdates.append(update)
-            } else {
-                state.updates.append(update)
+        updates.append(store.latestUpdate)
+
+        store.stateUpdatePublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [unowned self] update in
+                if self.isOverridingState {
+                    self.newUpdates.append(update)
+                } else {
+                    self.updates.append(update)
+                }
             }
-        }
+            .store(in: &cancellables)
 
-        onChange(of: $state.currentUpdate) { update in
-            store.stateOverride = update
-        }
+        let update = $currentUpdate
+            .removeDuplicates(by: { $0?.id == $1?.id })
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
 
-        onChange(of: $state.currentUpdate, to: nil) {
-            state.updates.append(contentsOf: state.newUpdates)
-            state.newUpdates.removeAll()
+        update.sink {
+            store.stateOverride = $0
         }
+        .store(in: &cancellables)
+
+        $currentUpdate
+            .removeDuplicates(by: { $0?.id == $1?.id })
+            .dropFirst()
+            .sink {
+                store.stateOverride = $0
+            }
+            .store(in: &cancellables)
+
+        update.filter { $0 == nil }.sink { [unowned self] _ in
+            self.updates.append(contentsOf: self.newUpdates)
+            self.newUpdates.removeAll()
+        }
+        .store(in: &cancellables)
     }
+}
 
+extension StateRecorderModel {
     func startStateOverrideTapped() {
-        state.isOverridingState = true
+        isOverridingState = true
     }
 
     func stopStateOverrideTapped() {
-        state.isOverridingState = false
+        isOverridingState = false
     }
 
     func stepForwardTapped() {
-        state.index += 1
+        index += 1
     }
 
     func longStepForwardTapped() {
-        state.index += 5
+        index += 5
     }
 
     func stepBackwardTapped() {
-        state.index -= 1
+        index -= 1
     }
 
     func longStepBackwardTapped() {
-        state.index -= 5
+        index -= 5
     }
 
-    var progress: Binding<Double> {
-        Binding($state).progress
+    var progressBinding: Binding<Double> {
+        .init {
+            self.progress
+        } set: {
+            self.progress = $0
+        }
     }
 
     func printDiffTapped() {
-        guard let update = state.currentUpdate else { return }
+        guard let update = currentUpdate else { return }
 
         if let printDiff = printDiff {
             printDiff(update)
@@ -99,11 +129,11 @@ struct StateRecorderModel<Model: ViewModel>: ViewModel {
     }
 }
 
-extension StateRecorderModel.State {
+extension StateRecorderModel {
     var index: Int {
         get {
             guard let update = currentUpdate,
-                  let index = updates.firstIndex(where: { $0 == update }) else {
+                  let index = updates.firstIndex(where: { $0.id == update.id }) else {
                       return max(0, updates.count - 1)
                   }
 
@@ -151,7 +181,7 @@ extension StateRecorderModel.State {
 }
 
 struct StateRecorderContainerView<VM: ViewModel>: View {
-    @Model var model: StateRecorderModel<VM>
+    @ObservedObject var model: StateRecorderModel<VM>
     let isPaused: Binding<Bool>?
     let edge: Edge
     @State var _isPaused = false
@@ -162,14 +192,9 @@ struct StateRecorderContainerView<VM: ViewModel>: View {
 
         ZStack(alignment: edge.alignment) {
             if model.isOverridingState {
-                if #available(iOS 14, macOS 11, *) {
-                    Color.gray.opacity(0.1)
-                        .ignoresSafeArea(.all, edges: .all)
-                        .transition(.opacity)
-                } else {
-                    Color.gray.opacity(0.1)
-                        .transition(.opacity)
-                }
+                Color.gray.opacity(0.1)
+                    .ignoresSafeArea(.all, edges: .all)
+                    .transition(.opacity)
 
                 StateRecorderView(model: model)
                     .recorderBackground(edges: .all)
@@ -202,14 +227,14 @@ struct StateRecorderContainerView<VM: ViewModel>: View {
                 model.stopStateOverrideTapped()
             }
         }
-        .onReceive($model.isOverridingState.valuePublisher) { isPaused in
+        .onChange(of: model.isOverridingState) { isPaused in
             self.isPaused?.wrappedValue = isPaused
         }
     }
 }
 
 struct StateRecorderView<VM: ViewModel>: View {
-    @Model var model: StateRecorderModel<VM>
+    @ObservedObject var model: StateRecorderModel<VM>
 
     var body: some View {
         VStack {
@@ -243,7 +268,7 @@ struct StateRecorderView<VM: ViewModel>: View {
                 }
                 .disabled(model.canStepBackward)
 
-                Text("\(model.index)/\(model.updates.count-1)")
+                Text("\(model.index)/\(model.updatesCount - 1)")
 
                 Button {
                     model.stepForwardTapped()
@@ -268,7 +293,7 @@ struct StateRecorderView<VM: ViewModel>: View {
                 }
             }
 
-            Slider(value: model.progress)
+            Slider(value: model.progressBinding)
         }
         .padding([.top, .horizontal], 8)
     }
@@ -279,10 +304,8 @@ extension View {
     func recorderBackground(edges: Edge.Set) -> some View {
         if #available(iOS 15, macOS 12, *) {
             background(Rectangle().fill(.ultraThinMaterial).opacity(0.95).ignoresSafeArea(edges: edges))
-        } else if #available(iOS 14, macOS 11, *) {
-            background(Color.gray.opacity(0.5).ignoresSafeArea(edges: edges))
         } else {
-            background(Color.gray.opacity(0.5))
+            background(Color.gray.opacity(0.5).ignoresSafeArea(edges: edges))
         }
     }
 }
