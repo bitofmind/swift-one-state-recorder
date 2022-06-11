@@ -3,18 +3,18 @@ import Combine
 import OneState
 
 public extension View {
-    func installStateRecorder<Model: ViewModel>(for store: Store<Model>, isPaused: Binding<Bool>? = nil, edge: Edge = .bottom, printDiff: ((StateUpdate<Model.State>) -> Void)? = nil) -> some View {
-        modifier(StateRecorderModifier<Model>(isPaused: isPaused, edge: edge, store: store, printDiff: printDiff))
+    func installStateRecorder<M: Model>(for store: Store<M>, isPaused: Binding<Bool>? = nil, edge: Edge = .bottom, printDiff: ((StateUpdate<M.State>) -> Void)? = nil) -> some View {
+        modifier(StateRecorderModifier<M>(isPaused: isPaused, edge: edge, store: store, printDiff: printDiff))
     }
 }
 
-struct StateRecorderModifier<Model: ViewModel>: ViewModifier {
+struct StateRecorderModifier<M: Model>: ViewModifier {
     let isPaused: Binding<Bool>?
     let edge: Edge
 
-    @StateObject var model: StateRecorderModel<Model>
+    @StateObject var model: StateRecorderModel<M>
 
-    init(isPaused: Binding<Bool>?, edge: Edge, store: Store<Model>, printDiff: ((StateUpdate<Model.State>) -> Void)?) {
+    init(isPaused: Binding<Bool>?, edge: Edge, store: Store<M>, printDiff: ((StateUpdate<M.State>) -> Void)?) {
         self.isPaused = isPaused
         self.edge = edge
         _model = .init(wrappedValue: StateRecorderModel(store: store, printDiff: printDiff))
@@ -28,11 +28,11 @@ struct StateRecorderModifier<Model: ViewModel>: ViewModifier {
     }
 }
 
-class StateRecorderModel<Model: ViewModel>: ObservableObject {
-    let store: Store<Model>
+class StateRecorderModel<M: Model>: ObservableObject {
+    let store: Store<M>
     let printDiff: ((Update) -> Void)?
 
-    typealias Update = StateUpdate<Model.State>
+    typealias Update = StateUpdate<M.State>
     @Published var updates: [Update] = []
     @Published var newUpdates: [Update] = []
     @Published var currentUpdate: Update?
@@ -41,7 +41,7 @@ class StateRecorderModel<Model: ViewModel>: ObservableObject {
 
     var cancellables = Set<AnyCancellable>()
 
-    init(store: Store<Model>, printDiff: ((Update) -> Void)?) {
+    init(store: Store<M>, printDiff: ((Update) -> Void)?) {
         self.store = store
         self.printDiff = printDiff
 
@@ -180,8 +180,8 @@ extension StateRecorderModel {
     }
 }
 
-struct StateRecorderContainerView<VM: ViewModel>: View {
-    @ObservedObject var model: StateRecorderModel<VM>
+struct StateRecorderContainerView<M: Model>: View {
+    @ObservedObject var model: StateRecorderModel<M>
     let isPaused: Binding<Bool>?
     let edge: Edge
     @State var _isPaused = false
@@ -233,8 +233,8 @@ struct StateRecorderContainerView<VM: ViewModel>: View {
     }
 }
 
-struct StateRecorderView<VM: ViewModel>: View {
-    @ObservedObject var model: StateRecorderModel<VM>
+struct StateRecorderView<M: Model>: View {
+    @ObservedObject var model: StateRecorderModel<M>
 
     var body: some View {
         VStack {
