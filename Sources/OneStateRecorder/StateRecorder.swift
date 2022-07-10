@@ -3,18 +3,18 @@ import Combine
 import OneState
 
 public extension View {
-    func installStateRecorder<M: Model>(for store: Store<M>, isPaused: Binding<Bool>? = nil, edge: Edge = .bottom, printDiff: ((StateUpdate<M.State>) -> Void)? = nil) -> some View {
+    @MainActor func installStateRecorder<M: Model>(for store: Store<M>, isPaused: Binding<Bool>? = nil, edge: Edge = .bottom, printDiff: (@Sendable (StateUpdate<M.State>) -> Void)? = nil) -> some View where M.State: Sendable {
         modifier(StateRecorderModifier<M>(isPaused: isPaused, edge: edge, store: store, printDiff: printDiff))
     }
 }
 
-struct StateRecorderModifier<M: Model>: ViewModifier {
+struct StateRecorderModifier<M: Model>: ViewModifier where M.State: Sendable {
     let isPaused: Binding<Bool>?
     let edge: Edge
 
     @StateObject var model: StateRecorderModel<M>
 
-    init(isPaused: Binding<Bool>?, edge: Edge, store: Store<M>, printDiff: ((StateUpdate<M.State>) -> Void)?) {
+    init(isPaused: Binding<Bool>?, edge: Edge, store: Store<M>, printDiff: (@Sendable (StateUpdate<M.State>) -> Void)?) {
         self.isPaused = isPaused
         self.edge = edge
         _model = .init(wrappedValue: StateRecorderModel(store: store, printDiff: printDiff))
@@ -28,7 +28,7 @@ struct StateRecorderModifier<M: Model>: ViewModifier {
     }
 }
 
-class StateRecorderModel<M: Model>: ObservableObject {
+class StateRecorderModel<M: Model>: ObservableObject where M.State: Sendable {
     let store: Store<M>
     let printDiff: ((Update) -> Void)?
 
@@ -47,7 +47,7 @@ class StateRecorderModel<M: Model>: ObservableObject {
 
         updates.append(store.latestUpdate)
 
-        store.stateUpdatePublisher
+        store.stateUpdatesPublisher
             .receive(on: DispatchQueue.main)
             .sink { [unowned self] update in
                 if self.isOverridingState {
@@ -180,7 +180,7 @@ extension StateRecorderModel {
     }
 }
 
-struct StateRecorderContainerView<M: Model>: View {
+struct StateRecorderContainerView<M: Model>: View where M.State: Sendable {
     @ObservedObject var model: StateRecorderModel<M>
     let isPaused: Binding<Bool>?
     let edge: Edge
@@ -233,7 +233,7 @@ struct StateRecorderContainerView<M: Model>: View {
     }
 }
 
-struct StateRecorderView<M: Model>: View {
+struct StateRecorderView<M: Model>: View where M.State: Sendable {
     @ObservedObject var model: StateRecorderModel<M>
 
     var body: some View {
