@@ -3,8 +3,8 @@ import Combine
 import OneState
 
 public extension View {
-    @MainActor func installStateRecorder<M: Model>(for store: Store<M>, isPaused: Binding<Bool>? = nil, edge: Edge = .bottom, printDiff: (@Sendable (StateUpdate<M.State>) -> Void)? = nil) -> some View where M.State: Sendable {
-        modifier(StateRecorderModifier<M>(isPaused: isPaused, edge: edge, store: store, printDiff: printDiff))
+    @MainActor func installStateRecorder<M: Model>(for store: Store<M>, isPaused: Binding<Bool>? = nil, edge: Edge = .bottom) -> some View where M.State: Sendable {
+        modifier(StateRecorderModifier<M>(isPaused: isPaused, edge: edge, store: store))
     }
 }
 
@@ -14,10 +14,10 @@ struct StateRecorderModifier<M: Model>: ViewModifier where M.State: Sendable {
 
     @StateObject var model: StateRecorderModel<M>
 
-    init(isPaused: Binding<Bool>?, edge: Edge, store: Store<M>, printDiff: (@Sendable (StateUpdate<M.State>) -> Void)?) {
+    init(isPaused: Binding<Bool>?, edge: Edge, store: Store<M>) {
         self.isPaused = isPaused
         self.edge = edge
-        _model = .init(wrappedValue: StateRecorderModel(store: store, printDiff: printDiff))
+        _model = .init(wrappedValue: StateRecorderModel(store: store))
     }
 
     func body(content: Content) -> some View {
@@ -30,7 +30,6 @@ struct StateRecorderModifier<M: Model>: ViewModifier where M.State: Sendable {
 
 class StateRecorderModel<M: Model>: ObservableObject where M.State: Sendable {
     let store: Store<M>
-    let printDiff: ((Update) -> Void)?
 
     typealias Update = StateUpdate<M.State>
     @Published var updates: [Update] = []
@@ -41,9 +40,8 @@ class StateRecorderModel<M: Model>: ObservableObject where M.State: Sendable {
 
     var cancellables = Set<AnyCancellable>()
 
-    init(store: Store<M>, printDiff: ((Update) -> Void)?) {
+    init(store: Store<M>) {
         self.store = store
-        self.printDiff = printDiff
 
         updates.append(store.latestUpdate)
 
@@ -119,13 +117,7 @@ extension StateRecorderModel {
 
     func printDiffTapped() {
         guard let update = currentUpdate else { return }
-
-        if let printDiff = printDiff {
-            printDiff(update)
-        } else {
-            print("previous", update.previous)
-            print("current", update.current)
-        }
+        update.printDiff()
     }
 }
 
