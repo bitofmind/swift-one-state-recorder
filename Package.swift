@@ -1,4 +1,4 @@
-// swift-tools-version:5.6
+// swift-tools-version:5.7
 
 import PackageDescription
 
@@ -18,7 +18,8 @@ let package = Package(
         .library(name: "OneStateRecorder", targets: ["OneStateRecorder"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/bitofmind/swift-one-state", from: "0.12.0"),
+        .package(url: "https://github.com/bitofmind/swift-one-state", from: "0.13.0"),
+        .package(url: "https://github.com/pointfreeco/swift-custom-dump", from: "0.6.0"),
     ],
     targets: [
         .target(

@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import OneState
+import CustomDump
 
 public extension View {
     @MainActor func installStateRecorder<M: Model>(for store: Store<M>, isPaused: Binding<Bool>? = nil, edge: Edge = .bottom) -> some View where M.State: Sendable {
@@ -30,11 +31,10 @@ struct StateRecorderModifier<M: Model>: ViewModifier where M.State: Sendable {
 
 class StateRecorderModel<M: Model>: ObservableObject where M.State: Sendable {
     let store: Store<M>
-
-    typealias Update = StateUpdate<M.State>
-    @Published var updates: [Update] = []
-    @Published var newUpdates: [Update] = []
-    @Published var currentUpdate: Update?
+    typealias State = M.State
+    @Published var updates: [State] = []
+    @Published var newUpdates: [State] = []
+    @Published var updateIndex: Int?
 
     var updatesCount: Int { updates.count }
 
@@ -43,38 +43,30 @@ class StateRecorderModel<M: Model>: ObservableObject where M.State: Sendable {
     init(store: Store<M>) {
         self.store = store
 
-        updates.append(store.latestUpdate)
+        updates.append(store.state)
 
-        store.stateUpdatesPublisher
+        store.stateDidUpdatePublisher
             .receive(on: DispatchQueue.main)
-            .sink { [unowned self] update in
+            .sink { [unowned self] in
                 if self.isOverridingState {
-                    self.newUpdates.append(update)
+                    self.newUpdates.append(store.state)
                 } else {
-                    self.updates.append(update)
+                    self.updates.append(store.state)
                 }
             }
             .store(in: &cancellables)
 
-        let update = $currentUpdate
-            .removeDuplicates(by: { $0?.id == $1?.id })
+        let updateIndex = $updateIndex
+            .removeDuplicates()
             .dropFirst()
             .receive(on: DispatchQueue.main)
 
-        update.sink {
-            store.stateOverride = $0
+        updateIndex.sink { index in
+            store.stateOverride = index.map { self.updates[$0] }
         }
         .store(in: &cancellables)
 
-        $currentUpdate
-            .removeDuplicates(by: { $0?.id == $1?.id })
-            .dropFirst()
-            .sink {
-                store.stateOverride = $0
-            }
-            .store(in: &cancellables)
-
-        update.filter { $0 == nil }.sink { [unowned self] _ in
+        updateIndex.filter { $0 == nil }.sink { [unowned self] _ in
             self.updates.append(contentsOf: self.newUpdates)
             self.newUpdates.removeAll()
         }
@@ -116,24 +108,21 @@ extension StateRecorderModel {
     }
 
     func printDiffTapped() {
-        guard let update = currentUpdate else { return }
-        update.printDiff()
+        guard let state, index > 0 else { return }
+        let previous = updates[index - 1]
+        guard let diff = diff(previous, state) else { return }
+        Swift.print("State did update:\n" + diff)
     }
 }
 
 extension StateRecorderModel {
     var index: Int {
-        get {
-            guard let update = currentUpdate,
-                  let index = updates.firstIndex(where: { $0.id == update.id }) else {
-                      return max(0, updates.count - 1)
-                  }
+        get { updateIndex ?? 0 }
+        set { updateIndex = max(0, min(updatesCount-1, newValue)) }
+    }
 
-            return index
-        }
-        set {
-            currentUpdate = updates[max(0, min(newValue, maxIndex))]
-        }
+    var state: State? {
+        updateIndex.map { updates[$0] }
     }
 
     var progress: Double {
@@ -141,7 +130,7 @@ extension StateRecorderModel {
             updates.isEmpty ? 1 : Double(index)/Double(maxIndex)
         }
         set {
-            index = updates.isEmpty ? 0 : Int(round(newValue*Double(maxIndex)))
+            updateIndex = updates.isEmpty ? 0 : Int(round(newValue*Double(maxIndex)))
         }
     }
 
@@ -150,15 +139,15 @@ extension StateRecorderModel {
 
     var isOverridingState: Bool {
         get {
-            currentUpdate != nil
+            updateIndex != nil
         }
         set {
             guard newValue != isOverridingState else { return }
 
             if newValue {
-                currentUpdate = updates.last
+                updateIndex = updatesCount - 1
             } else {
-                currentUpdate = nil
+                updateIndex = nil
             }
         }
     }
