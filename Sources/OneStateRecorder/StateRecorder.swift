@@ -47,7 +47,8 @@ class StateRecorderModel<M: Model>: ObservableObject where M.State: Sendable {
 
         store.stateDidUpdatePublisher
             .receive(on: DispatchQueue.main)
-            .sink { [unowned self] in
+            .sink { [weak self] in
+                guard let self else { return }
                 if self.isOverridingState {
                     self.newUpdates.append(store.state)
                 } else {
@@ -66,7 +67,8 @@ class StateRecorderModel<M: Model>: ObservableObject where M.State: Sendable {
         }
         .store(in: &cancellables)
 
-        updateIndex.filter { $0 == nil }.sink { [unowned self] _ in
+        updateIndex.filter { $0 == nil }.sink { [weak self] _ in
+            guard let self else { return }
             self.updates.append(contentsOf: self.newUpdates)
             self.newUpdates.removeAll()
         }
